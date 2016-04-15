@@ -1,0 +1,5 @@
+*~
+*.exe
+*.dSYM
+examples/bzip2
+examples/basic

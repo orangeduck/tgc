@@ -1,0 +1,9 @@
+{
+  "name": "tgc",
+  "version": "0.1.0",
+  "repo": "orangeduck/tgc",
+  "description": "A tiny Garbage Collector for C",
+  "keywords": ["garbage", "collector", "library", "c", "tgc"],
+  "license": "BSD",
+  "src": ["tgc.c", "tgc.h"]
+}
