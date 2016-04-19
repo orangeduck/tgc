@@ -7,8 +7,8 @@
 #include <setjmp.h>
 
 enum {
-  GC_ROOT   = 0x01,
-  GC_MARKED = 0x02
+  TGC_ROOT   = 0x01,
+  TGC_MARKED = 0x02
 };
 
 typedef struct {
@@ -16,30 +16,33 @@ typedef struct {
   int flags;
   size_t size;
   size_t hash;
-} gc_item_t;
+  void (*dtor)(void*);
+} tgc_ptr_t;
 
 typedef struct {
   void *bottom;
-  gc_item_t *items;
-  size_t nitems, nslots, mitems;
   uintptr_t minptr, maxptr;
-  size_t freenum;
-  void **freelist;
-  double loadfactor;
-  double sweepfactor;
-} gc_t;
+  tgc_ptr_t *items, *frees;
+  double loadfactor, sweepfactor;
+  size_t nitems, nslots, mitems, nfrees;
+} tgc_t;
 
-void gcstart(gc_t *gc);
-void gcstop(gc_t *gc);
-void gcrun(gc_t *gc);
+void tgc_start(tgc_t *gc, void *stk);
+void tgc_stop(tgc_t *gc);
+void tgc_run(tgc_t *gc);
 
-void *gcalloc(gc_t *gc, size_t size);
-void *gccalloc(gc_t *gc, size_t num, size_t size);
-void *gcrootalloc(gc_t *gc, size_t size);
-void *gcrootcalloc(gc_t *gc, size_t num, size_t size);
+void *tgc_alloc(tgc_t *gc, size_t size);
+void *tgc_calloc(tgc_t *gc, size_t num, size_t size);
+void *tgc_realloc(tgc_t *gc, void *ptr, size_t size);
+void tgc_free(tgc_t *gc, void *ptr);
 
-void *gcrealloc(gc_t *gc, void *ptr, size_t size);
-void gcfree(gc_t *gc, void *ptr);
+void *tgc_alloc_opt(tgc_t *gc, size_t size, int flags, void(*dtor)(void*));
+void *tgc_calloc_opt(tgc_t *gc, size_t num, size_t size, int flags, void(*dtor)(void*));
+
+void tgc_set_dtor(tgc_t *gc, void *ptr, void(*dtor)(void*));
+void tgc_set_flags(tgc_t *gc, void *ptr, int flags);
+int tgc_get_flags(tgc_t *gc, void *ptr);
+void(*tgc_get_dtor(tgc_t *gc, void *ptr))(void*);
 
 
 #endif

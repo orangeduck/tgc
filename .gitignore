@@ -1,5 +1,13 @@
 *~
+*.a
+*.o
+*.so
 *.exe
 *.dSYM
+examples/mpc
 examples/bzip2
 examples/basic
+examples/advanced
+examples/oggenc
+examples/jfk.ogg
+examples/Lenna.png.bz

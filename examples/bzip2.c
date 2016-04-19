@@ -67,7 +67,7 @@ extern "C" {
 
 #include "../tgc.h"
 
-static gc_t *tgc_gc = NULL;
+static tgc_t tgc_gc;
 
 #define BZ_RUN               0
 #define BZ_FLUSH             1
@@ -3531,7 +3531,9 @@ int bz_config_ok ( void )
 static
 void* default_bzalloc ( void* opaque, Int32 items, Int32 size )
 {
-   void* v = gcalloc ( tgc_gc, items * size );
+   // tgc
+   void* v = tgc_alloc ( &tgc_gc, items * size );
+   //void* v = malloc ( items * size );
    return v;
 }
 
@@ -4341,7 +4343,9 @@ BZFILE* BZ_API(BZ2_bzWriteOpen)
    if (ferror(f))
       { BZ_SETERR(BZ_IO_ERROR); return NULL; };
 
-   bzf = gcalloc ( tgc_gc, sizeof(bzFile) );
+   // tgc
+   bzf = tgc_alloc ( &tgc_gc, sizeof(bzFile) );
+   //bzf = malloc ( sizeof(bzFile) );
    if (bzf == NULL)
       { BZ_SETERR(BZ_MEM_ERROR); return NULL; };
 
@@ -4359,8 +4363,8 @@ BZFILE* BZ_API(BZ2_bzWriteOpen)
                               verbosity, workFactor );
    if (ret != BZ_OK) {
       BZ_SETERR(ret);
-      // tgc_gc
-      // free(bzf);
+      // tgc
+      //free(bzf);
       return NULL;
   };
 
@@ -4519,7 +4523,9 @@ BZFILE* BZ_API(BZ2_bzReadOpen)
    if (ferror(f))
       { BZ_SETERR(BZ_IO_ERROR); return NULL; };
 
-   bzf = gcalloc ( tgc_gc, sizeof(bzFile) );
+   // tgc
+   bzf = tgc_alloc ( &tgc_gc, sizeof(bzFile) );
+   //bzf = malloc ( sizeof(bzFile) );
    if (bzf == NULL) 
       { BZ_SETERR(BZ_MEM_ERROR); return NULL; };
 
@@ -6683,8 +6689,10 @@ static
 void *myMalloc ( Int32 n )
 {
    void* p;
-
-   p = gcalloc ( tgc_gc, (size_t)n );
+   
+   // tgc
+   p = tgc_alloc ( &tgc_gc, (size_t)n );
+   //p = malloc((size_t)n);
    if (p == NULL) outOfMemory ();
    return p;
 }
@@ -6752,23 +6760,30 @@ void addFlagsFromEnvVar ( Cell** argList, Char* varName )
 /*---------------------------------------------*/
 #define ISFLAG(s) (strcmp(aa->name, (s))==0)
 
-static void gcexit(void) {
-  gcstop(tgc_gc);
+static void tgc_exit(void) {
+  tgc_stop(&tgc_gc);
 }
+
+static IntNative bzip2_main ( IntNative argc, Char *argv[] );
 
 IntNative main ( IntNative argc, Char *argv[] )
 {
+  tgc_start(&tgc_gc, &argc);
+  atexit(tgc_exit);
+  IntNative (*volatile func)(IntNative,Char*[]) = bzip2_main;
+  return func(argc, argv);
+}
+
+static IntNative bzip2_main ( IntNative argc, Char *argv[] )
+{
+
    Int32  i, j;
    Char   *tmp;
    Cell   *argList;
    Cell   *aa;
    Bool   decode;
    
-   gc_t gc;
-   tgc_gc = &gc;
-   gcstart(tgc_gc);
-   atexit(gcexit);
-   
+
 
    /*-- Be really really really paranoid :-) --*/
    if (sizeof(Int32) != 4 || sizeof(UInt32) != 4  ||

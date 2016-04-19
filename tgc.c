@@ -1,12 +1,15 @@
 #include "tgc.h"
 
-static void gcsetptr(gc_t* gc, void *ptr, size_t size, int flags);
+
+static void tgc_add_ptr(
+  tgc_t* gc, void *ptr, size_t size, 
+  int flags, void(*dtor)(void*));
 
 enum {
-  GC_PRIMES_COUNT = 24
+  TGC_PRIMES_COUNT = 24
 };
 
-static const size_t gcprimes[GC_PRIMES_COUNT] = {
+static const size_t tgc_primes[TGC_PRIMES_COUNT] = {
   0,       1,       5,       11,
   23,      53,      101,     197,
   389,     683,     1259,    2417,
@@ -15,35 +18,33 @@ static const size_t gcprimes[GC_PRIMES_COUNT] = {
   1100009, 2200013, 4400021, 8800019
 };
 
-static size_t gcprobe(gc_t* gc, size_t i, size_t h) {
+static size_t tgc_probe(tgc_t* gc, size_t i, size_t h) {
   long v = i - (h-1);
-  if (v < 0) {
-    v = gc->nslots + v;
-  }
+  if (v < 0) { v = gc->nslots + v; }
   return v;
 }
 
-static size_t gcidealsize(gc_t* gc, size_t size) {
+static size_t tgc_ideal_size(tgc_t* gc, size_t size) {
   size_t i, last;
   size = (size_t)((double)(size+1) / gc->loadfactor);
-  for (i = 0; i < GC_PRIMES_COUNT; i++) {
-    if (gcprimes[i] >= size) { return gcprimes[i]; }
+  for (i = 0; i < TGC_PRIMES_COUNT; i++) {
+    if (tgc_primes[i] >= size) { return tgc_primes[i]; }
   }
-  last = gcprimes[GC_PRIMES_COUNT-1];
+  last = tgc_primes[TGC_PRIMES_COUNT-1];
   for (i = 0;; i++) {
     if (last * i >= size) { return last * i; }
   }
   return 0;
 }
 
-static int gcrehash(gc_t* gc, size_t new_size) {
+static int tgc_rehash(tgc_t* gc, size_t new_size) {
 
   size_t i;
-  gc_item_t *old_items = gc->items;
+  tgc_ptr_t *old_items = gc->items;
   size_t old_size = gc->nslots;
   
   gc->nslots = new_size;
-  gc->items = calloc(gc->nslots, sizeof(gc_item_t));
+  gc->items = calloc(gc->nslots, sizeof(tgc_ptr_t));
   
   if (gc->items == NULL) {
     gc->nslots = old_size;
@@ -53,7 +54,9 @@ static int gcrehash(gc_t* gc, size_t new_size) {
   
   for (i = 0; i < old_size; i++) {
     if (old_items[i].hash != 0) {
-      gcsetptr(gc, old_items[i].ptr, old_items[i].size, old_items[i].flags);
+      tgc_add_ptr(gc, 
+        old_items[i].ptr,   old_items[i].size, 
+        old_items[i].flags, old_items[i].dtor);
     }
   }
   
@@ -62,42 +65,44 @@ static int gcrehash(gc_t* gc, size_t new_size) {
   return 1;
 }
 
-static int gcresizemore(gc_t *gc) {
-  size_t new_size = gcidealsize(gc, gc->nitems);  
+static int tgc_resize_more(tgc_t *gc) {
+  size_t new_size = tgc_ideal_size(gc, gc->nitems);  
   size_t old_size = gc->nslots;
-  return (new_size > old_size) ? gcrehash(gc, new_size) : 1;
+  return (new_size > old_size) ? tgc_rehash(gc, new_size) : 1;
 }
 
-static int gcresizeless(gc_t *gc) {
-  size_t new_size = gcidealsize(gc, gc->nitems);  
+static int tgc_resize_less(tgc_t *gc) {
+  size_t new_size = tgc_ideal_size(gc, gc->nitems);  
   size_t old_size = gc->nslots;
-  return (new_size < old_size) ? gcrehash(gc, new_size) : 1;
+  return (new_size < old_size) ? tgc_rehash(gc, new_size) : 1;
 }
 
-static size_t gchash(void *ptr) {
+static size_t tgc_hash(void *ptr) {
   return ((uintptr_t)ptr) >> 3;
 }
 
-static void gcsetptr(gc_t *gc, void *ptr, size_t size, int flags) {
-  
-  gc_item_t item;
+static void tgc_add_ptr(
+  tgc_t *gc, void *ptr, size_t size, 
+  int flags, void(*dtor)(void*)) {
+
+  tgc_ptr_t item;
   size_t h, p, i, j;
 
-  i = gchash(ptr) % gc->nslots; j = 0;
+  i = tgc_hash(ptr) % gc->nslots; j = 0;
   
   item.ptr = ptr;
   item.flags = flags;
   item.size = size;
   item.hash = i+1;
+  item.dtor = dtor;
   
   while (1) {
-    
     h = gc->items[i].hash;
     if (h == 0) { gc->items[i] = item; return; }
     if (gc->items[i].ptr == item.ptr) { return; }
-    p = gcprobe(gc, i, h);
+    p = tgc_probe(gc, i, h);
     if (j >= p) {
-      gc_item_t tmp = gc->items[i];
+      tgc_ptr_t tmp = gc->items[i];
       gc->items[i] = item;
       item = tmp;
       j = p;
@@ -109,30 +114,30 @@ static void gcsetptr(gc_t *gc, void *ptr, size_t size, int flags) {
   
 }
 
-static void gcremptr(gc_t *gc, void *ptr) {
-  
+static void tgc_rem_ptr(tgc_t *gc, void *ptr) {
+
   size_t i, j, h, nj, nh;
-  
+
   if (gc->nslots == 0) { return; }
   
-  for (i = 0; i < gc->freenum; i++) {
-    if (gc->freelist[i] == ptr) { gc->freelist[i] = NULL; }
+  for (i = 0; i < gc->nfrees; i++) {
+    if (gc->frees[i].ptr == ptr) { gc->frees[i].ptr = NULL; }
   }
   
-  i = gchash(ptr) % gc->nslots; j = 0;
+  i = tgc_hash(ptr) % gc->nslots; j = 0;
   
   while (1) {
     h = gc->items[i].hash;
-    if (h == 0 || j > gcprobe(gc, i, h)) { return; }
+    if (h == 0 || j > tgc_probe(gc, i, h)) { return; }
     if (gc->items[i].ptr == ptr) {
-      memset(&gc->items[i], 0, sizeof(gc_item_t));
+      memset(&gc->items[i], 0, sizeof(tgc_ptr_t));
       j = i;
       while (1) { 
         nj = (j+1) % gc->nslots;
         nh = gc->items[nj].hash;
-        if (nh != 0 && gcprobe(gc, nj, nh) > 0) {
-          memcpy(&gc->items[ j], &gc->items[nj], sizeof(gc_item_t));
-          memset(&gc->items[nj],              0, sizeof(gc_item_t));
+        if (nh != 0 && tgc_probe(gc, nj, nh) > 0) {
+          memcpy(&gc->items[ j], &gc->items[nj], sizeof(tgc_ptr_t));
+          memset(&gc->items[nj],              0, sizeof(tgc_ptr_t));
           j = nj;
         } else {
           break;
@@ -148,48 +153,34 @@ static void gcremptr(gc_t *gc, void *ptr) {
   
 }
 
-static void gcresizeitem(gc_t *gc, void *ptr, size_t size) {
+static tgc_ptr_t *tgc_get_ptr(tgc_t *gc, void *ptr) {
   size_t i, j, h;
-  i = gchash(ptr) % gc->nslots; j = 0;
+  i = tgc_hash(ptr) % gc->nslots; j = 0;
   while (1) {
     h = gc->items[i].hash;
-    if (h == 0 || j > gcprobe(gc, i, h)) { return; }
-    if (gc->items[i].ptr == ptr) { gc->items[i].size = size; return; }
+    if (h == 0 || j > tgc_probe(gc, i, h)) { return 0; }
+    if (gc->items[i].ptr == ptr) { return &gc->items[i]; }
     i = (i+1) % gc->nslots; j++;
   }
+  return NULL;
 }
 
-static int gcflagsitem(gc_t *gc, void *ptr) {
-  size_t i, j, h;
-  i = gchash(ptr) % gc->nslots; j = 0;
-  while (1) {
-    h = gc->items[i].hash;
-    if (h == 0 || j > gcprobe(gc, i, h)) { return 0; }
-    if (gc->items[i].ptr == ptr) { return gc->items[i].flags; }
-    i = (i+1) % gc->nslots; j++;
-  }
-  return 0;
-}
+static void tgc_mark_ptr(tgc_t *gc, void *ptr) {
 
-static void gcmarkitem(gc_t *gc, void *ptr) {
-  
   size_t i, j, h, k;
-  uintptr_t pval = (uintptr_t)ptr;
-  if (pval < gc->minptr || pval > gc->maxptr) { return; }
+  if ((uintptr_t)ptr < gc->minptr 
+  ||  (uintptr_t)ptr > gc->maxptr) { return; }
   
-  i = gchash(ptr) % gc->nslots; j = 0;
+  i = tgc_hash(ptr) % gc->nslots; j = 0;
   
   while (1) {
     h = gc->items[i].hash;
-    if (h == 0 || j > gcprobe(gc, i, h)) { return; }
-    if (pval >= ((uintptr_t)gc->items[i].ptr)
-    &&  pval <  ((uintptr_t)gc->items[i].ptr) + gc->items[i].size
-    && !(gc->items[i].flags & GC_MARKED)) {
-      gc->items[i].flags |= GC_MARKED;
-      for (k = 0;
-        k + sizeof(void*) <= gc->items[k].size;
-        k += sizeof(void*)) {
-        gcmarkitem(gc, *((void**)(((char*)ptr) + k)));
+    if (h == 0 || j > tgc_probe(gc, i, h)) { break; }
+    if (ptr == gc->items[i].ptr) {
+      if (gc->items[i].flags & TGC_MARKED) { return; }
+      gc->items[i].flags |= TGC_MARKED;
+      for (k = 0; k < gc->items[i].size/sizeof(void*); k++) {
+        tgc_mark_ptr(gc, ((void**)gc->items[i].ptr)[k]);
       }
       return;
     }
@@ -198,7 +189,7 @@ static void gcmarkitem(gc_t *gc, void *ptr) {
   
 }
 
-static void gcmarkstack(gc_t *gc) {
+static void tgc_mark_stack(tgc_t *gc) {
   
   void *stk, *bot, *top, *p;
   bot = gc->bottom; top = &stk;
@@ -207,80 +198,82 @@ static void gcmarkstack(gc_t *gc) {
   
   if (bot < top) {
     for (p = top; p >= bot; p = ((char*)p) - sizeof(void*)) {
-      gcmarkitem(gc, *((void**)p));
+      tgc_mark_ptr(gc, *((void**)p));
     }
   }
   
   if (bot > top) {
     for (p = top; p <= bot; p = ((char*)p) + sizeof(void*)) {
-      gcmarkitem(gc, *((void**)p));
+      tgc_mark_ptr(gc, *((void**)p));
     }
   }
   
 }
 
-static void gcmarkstackfake(gc_t *gc) { }
-
-static void gcmark(gc_t *gc) {
+static void tgc_mark(tgc_t *gc) {
   
   size_t i, k;
-  volatile int noinline;
+  void (*volatile mark_stack)(tgc_t*) = tgc_mark_stack;
   
   if (gc->nitems == 0) { return; }
   
   for (i = 0; i < gc->nslots; i++) {
     if (gc->items[i].hash == 0) { continue; }
-    if (gc->items[i].flags & GC_MARKED) { continue; }
-    if (gc->items[i].flags & GC_ROOT) {
-      gc->items[i].flags |= GC_MARKED;
-      for (k = 0;
-        k + sizeof(void*) <= gc->items[k].size;
-        k += sizeof(void*)) {
-        gcmarkitem(gc, *((void**)(((char*)gc->items[i].ptr) + k)));
+    if (gc->items[i].flags & TGC_MARKED) { continue; }
+    if (gc->items[i].flags & TGC_ROOT) {
+      gc->items[i].flags |= TGC_MARKED;
+      for (k = 0; k < gc->items[i].size/sizeof(void*); k++) {
+        tgc_mark_ptr(gc, ((void**)gc->items[i].ptr)[k]);
       }
       return;
     }
   }
   
-  noinline = 1;
-  
-  if (noinline) {
+  if (mark_stack) {
     jmp_buf env;
     memset(&env, 0, sizeof(jmp_buf));
     setjmp(env);
-  }  
+    mark_stack(gc);
+  }
 
-  (noinline ? gcmarkstack : gcmarkstackfake)(gc);
-  
 }
 
-void gcsweep(gc_t *gc) {
+void tgc_sweep(tgc_t *gc) {
   
-  size_t i, j, nj, nh;
+  size_t i, j, k, nj, nh;
   
-  gc->freelist = realloc(gc->freelist, sizeof(void*) * gc->nitems);
-  gc->freenum = 0;
+  if (gc->nitems == 0) { return; }
+  
+  gc->nfrees = 0;
+  
+  for (i = 0; i < gc->nslots; i++) {
+    if ( gc->items[i].hash != 0
+    && !(gc->items[i].flags & TGC_ROOT)
+    && !(gc->items[i].flags & TGC_MARKED)) {
+      gc->nfrees++;
+    }
+  }
+
+  gc->frees = realloc(gc->frees, sizeof(tgc_ptr_t) * gc->nfrees);
+  if (gc->frees == NULL) { return; }
   
   i = 0;
+  k = 0;
   while (i < gc->nslots) {
-    
     if (gc->items[i].hash == 0) { i++; continue; }
-    if (gc->items[i].flags & GC_MARKED) { i++; continue; }
-    
-    if (!(gc->items[i].flags & GC_ROOT)
-    &&  !(gc->items[i].flags & GC_MARKED)) {
+    if (gc->items[i].flags & TGC_MARKED) { i++; continue; }
+    if (!(gc->items[i].flags & TGC_ROOT)) {
       
-      gc->freelist[gc->freenum] = gc->items[i].ptr;
-      gc->freenum++;
-      memset(&gc->items[i], 0, sizeof(gc_item_t));
+      gc->frees[k] = gc->items[i]; k++;
+      memset(&gc->items[i], 0, sizeof(tgc_ptr_t));
       
       j = i;
       while (1) { 
         nj = (j+1) % gc->nslots;
         nh = gc->items[nj].hash;
-        if (nh != 0 && gcprobe(gc, nj, nh) > 0) {
-          memcpy(&gc->items[ j], &gc->items[nj], sizeof(gc_item_t));
-          memset(&gc->items[nj],              0, sizeof(gc_item_t));
+        if (nh != 0 && tgc_probe(gc, nj, nh) > 0) {
+          memcpy(&gc->items[ j], &gc->items[nj], sizeof(tgc_ptr_t));
+          memset(&gc->items[nj],              0, sizeof(tgc_ptr_t));
           j = nj;
         } else {
           break;
@@ -295,59 +288,68 @@ void gcsweep(gc_t *gc) {
   }
   
   for (i = 0; i < gc->nslots; i++) {
-    if (gc->items[i].hash == 0) { continue; }
-    if (gc->items[i].flags & GC_MARKED) {
-      gc->items[i].flags &= (~GC_MARKED);
-      continue;
+    if (gc->items[i].hash != 0
+    && (gc->items[i].flags & TGC_MARKED)) {
+      gc->items[i].flags &= ~TGC_MARKED;
     }
   }
   
-  gcresizeless(gc);
+  tgc_resize_less(gc);
   gc->mitems = gc->nitems + (size_t)(gc->nitems * gc->sweepfactor) + 1;
   
-  for (i = 0; i < gc->freenum; i++) {
-    if (gc->freelist[i]) {
-      free(gc->freelist[i]);
+  for (i = 0; i < gc->nfrees; i++) {
+    if (gc->frees[i].ptr) {
+      if (gc->frees[i].dtor) {
+        gc->frees[i].dtor(gc->frees[i].ptr);
+      }
+      free(gc->frees[i].ptr);
     }
   }
   
-  free(gc->freelist);
-  gc->freelist = NULL;
-  gc->freenum = 0;
+  free(gc->frees);
+  gc->frees = NULL;
+  gc->nfrees = 0;
   
 }
 
-void gcstart(gc_t *gc) {
-  gc->bottom = gc;
-  gc->items = NULL;
+void tgc_start(tgc_t *gc, void *stk) {
+  gc->bottom = stk;
   gc->nitems = 0;
   gc->nslots = 0;
   gc->mitems = 0;
+  gc->nfrees = 0;
   gc->maxptr = 0;
+  gc->items = NULL;
+  gc->frees = NULL;
   gc->minptr = UINTPTR_MAX;
-  gc->freelist = NULL;
-  gc->freenum = 0;
   gc->loadfactor = 0.9;
   gc->sweepfactor = 0.5;
 }
 
-void gcstop(gc_t *gc) {
+void tgc_stop(tgc_t *gc) {
+  tgc_sweep(gc);
   free(gc->items);
-  free(gc->freelist);
+  free(gc->frees);
 }
 
-void gcrun(gc_t *gc) {
-  gcmark(gc);
-  gcsweep(gc);
+void tgc_run(tgc_t *gc) {
+  tgc_mark(gc);
+  tgc_sweep(gc);
 }
 
-static void *gcset(gc_t *gc, void *ptr, size_t size, int flags) {
+static void *tgc_add(
+  tgc_t *gc, void *ptr, size_t size, 
+  int flags, void(*dtor)(void*)) {
+
   gc->nitems++;
-  gc->maxptr = (uintptr_t)ptr > gc->maxptr ? (uintptr_t)ptr : gc->maxptr + size; 
-  gc->minptr = (uintptr_t)ptr < gc->minptr ? (uintptr_t)ptr : gc->minptr;
-  if (gcresizemore(gc)) {
-    gcsetptr(gc, ptr, size, flags);
-    if (gc->nitems > gc->mitems) { gcrun(gc); }
+  gc->maxptr = ((uintptr_t)ptr) + size > gc->maxptr ? 
+    ((uintptr_t)ptr) + size : gc->maxptr; 
+  gc->minptr = ((uintptr_t)ptr)        < gc->minptr ? 
+    ((uintptr_t)ptr)        : gc->minptr;
+
+  if (tgc_resize_more(gc)) {
+    tgc_add_ptr(gc, ptr, size, flags, dtor);
+    if (gc->nitems > gc->mitems) { tgc_run(gc); }
     return ptr;
   } else {
     gc->nitems--;
@@ -356,59 +358,100 @@ static void *gcset(gc_t *gc, void *ptr, size_t size, int flags) {
   }
 }
 
-void *gcalloc(gc_t *gc, size_t size) {
-  void *ptr = malloc(size);
-  if (ptr != NULL) {
-    ptr = gcset(gc, ptr, size, 0);
-  }
-  return ptr;
-}
-
-void *gcrootalloc(gc_t *gc, size_t size) {
-  void *ptr = malloc(size);
-  if (ptr != NULL) {
-    ptr = gcset(gc, ptr, size, GC_ROOT);
-  }
-  return ptr;
-}
-
-void *gccalloc(gc_t *gc, size_t num, size_t size) {
-  void *ptr = calloc(num, size);
-  if (ptr != NULL) {
-    ptr = gcset(gc, ptr, num * size, 0);
-  }
-  return ptr;
-}
-
-void *gcrootcalloc(gc_t *gc, size_t num, size_t size) {
-  void *ptr = calloc(num, size);
-  if (ptr != NULL) {
-    ptr = gcset(gc, ptr, num * size, GC_ROOT);
-  }
-  return ptr;
-}
-
-void *gcrealloc(gc_t *gc, void *ptr, size_t size) {
-  
-  void *newptr = realloc(ptr, size);
-  
-  if (newptr == NULL) {
-    gcremptr(gc, ptr);
-  } else if (newptr == ptr) {
-    gcresizeitem(gc, ptr, size);
-  } else {
-    int flags = gcflagsitem(gc, ptr);
-    gcremptr(gc, ptr);
-    gcsetptr(gc, newptr, size, flags);
-  }
-  
-  return newptr;
-}
-
-void gcfree(gc_t *gc, void *ptr) {
-  if (ptr == NULL) { return; }
-  gcremptr(gc, ptr);
-  free(ptr);
-  gcresizeless(gc);
+static void tgc_rem(tgc_t *gc, void *ptr) {
+  tgc_rem_ptr(gc, ptr);
+  tgc_resize_less(gc);
   gc->mitems = gc->nitems + gc->nitems / 2 + 1;
 }
+
+void *tgc_alloc(tgc_t *gc, size_t size) {
+  return tgc_alloc_opt(gc, size, 0, NULL);
+}
+
+void *tgc_calloc(tgc_t *gc, size_t num, size_t size) {
+  return tgc_calloc_opt(gc, num, size, 0, NULL);
+}
+
+void *tgc_realloc(tgc_t *gc, void *ptr, size_t size) {
+  
+  tgc_ptr_t *p;
+  void *qtr = realloc(ptr, size);
+  
+  if (qtr == NULL) {
+    tgc_rem(gc, ptr);
+    return qtr;
+  }
+
+  if (ptr == NULL) {
+    tgc_add(gc, qtr, size, 0, NULL);
+    return qtr;
+  }
+
+  p  = tgc_get_ptr(gc, ptr);
+
+  if (p && qtr == ptr) {
+    p->size = size;
+    return qtr;
+  }
+
+  if (p && qtr != ptr) {
+    int flags = p->flags;
+    void(*dtor)(void*) = p->dtor;
+    tgc_rem(gc, ptr);
+    tgc_add(gc, qtr, size, flags, dtor);
+    return qtr;
+  }
+
+  return NULL;
+}
+
+void tgc_free(tgc_t *gc, void *ptr) {
+  tgc_ptr_t *p  = tgc_get_ptr(gc, ptr);
+  /* TODO: Optimise */
+  if (p && p->dtor) {
+    p->dtor(ptr);
+    free(ptr);
+    tgc_rem(gc, ptr);
+  }
+}
+
+void *tgc_alloc_opt(tgc_t *gc, size_t size, int flags, void(*dtor)(void*)) {
+  void *ptr = malloc(size);
+  if (ptr != NULL) {
+    ptr = tgc_add(gc, ptr, size, flags, dtor);
+  }
+  return ptr;
+}
+
+void *tgc_calloc_opt(
+  tgc_t *gc, size_t num, size_t size, 
+  int flags, void(*dtor)(void*)) {
+  void *ptr = calloc(num, size);
+  if (ptr != NULL) {
+    ptr = tgc_add(gc, ptr, num * size, flags, dtor);
+  }
+  return ptr;
+}
+
+void tgc_set_dtor(tgc_t *gc, void *ptr, void(*dtor)(void*)) {
+  tgc_ptr_t *p  = tgc_get_ptr(gc, ptr);
+  if (p) { p->dtor = dtor; }
+}
+
+void tgc_set_flags(tgc_t *gc, void *ptr, int flags) {
+  tgc_ptr_t *p  = tgc_get_ptr(gc, ptr);
+  if (p) { p->flags = flags; }
+}
+
+int tgc_get_flags(tgc_t *gc, void *ptr) {
+  tgc_ptr_t *p  = tgc_get_ptr(gc, ptr);
+  if (p) { return p->flags; }
+  return 0;
+}
+
+void(*tgc_get_dtor(tgc_t *gc, void *ptr))(void*) {
+  tgc_ptr_t *p  = tgc_get_ptr(gc, ptr);
+  if (p) { return p->dtor; }
+  return NULL;
+}
+
