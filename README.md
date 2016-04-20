@@ -4,8 +4,8 @@ Tiny Garbage Collector
 About
 -----
 
-`tgc` is a tiny garbage collector written in ~500 lines of C and based on the 
-[Cello Garbage Collector](http://libcello.org/learn/garbage-collection).
+`tgc` is a tiny garbage collector for C written in ~500 lines of code and based 
+on the [Cello Garbage Collector](http://libcello.org/learn/garbage-collection).
 
 ```c
 #include "tgc.h"
@@ -137,8 +137,15 @@ the allocation is a garbage collection _root_ and so should not be
 automatically freed and instead will be manually freed by the user with 
 `tgc_free`. Because roots are not automatically freed, they can exist in 
 normally unreachable locations such as in the `static` data segment or in 
-memory allocated by `malloc`. Otherwise the `flags` argument can be set to 
-zero.
+memory allocated by `malloc`. 
+
+The flag `TGC_LEAF` may be specified to indicate that the allocation is a 
+garbage collection _leaf_ and so contains no pointers to other allocations
+inside. This can benefit performance in many cases. For example, if allocating 
+a large string there is no point the garbage collector scanning this allocation 
+- it can take a long time and doesn't contain any pointers.
+
+Otherwise the `flags` argument can be set to zero.
 
 The `dtor` argument lets the user specify a _destructor_ function to be run 
 just before the memory is freed. Destructors have many uses, for example they 
@@ -192,8 +199,40 @@ Get the destructor associated with a memory allocation.
 
 * * *
 
+```c
+size_t tgc_get_size(tgc_t *gc, void *ptr);
+```
+
+Get the size of a memory allocation.
+
 F.A.Q
 -----
+
+### Is this real/safe/portable?
+
+Definitely! While there is no way to create a _completely_ safe/portable 
+garbage collector in C this collector doesn't use any platform specific tricks 
+and only makes the most basic assumptions about the platform, such as that the 
+architecture using a continuous call stack to implement function frames.
+
+It _should_ be safe to use for more or less all reasonable architectures found 
+in the wild and has been tested on Linux, Windows, and OSX, where it was easily 
+integrated into several large real world programs (see `examples`) such as 
+`bzip2` and `oggenc` without issue.
+
+Saying all of that, there are the normal warnings - this library performs 
+_undefined behaviour_ as specified by the C standard and so you use it at your 
+own risk - there is no guarantee that something like a compiler or OS update 
+wont mysteriously break it.
+
+
+### What happens when some data just happens to look like a pointer?
+
+In this unlikely case `tgc` will treat the data as a pointer and assume that 
+the memory allocation it points to is still reachable. If this is causing your
+application trouble by not allowing a large memory allocation to be freed 
+consider freeing it manually with `tgc_free`.
+
 
 ### `tgc` isn't working when I increment pointers!
 
@@ -275,20 +314,11 @@ Valgrind these accesses will be reported as warnings/errors. Other than this
 disable these to examine any real problems is to run Valgrind with the option 
 `--undef-value-errors=no`.
 
-### Is this real/safe/portable?
+### Is `tgc` fast?
 
-Definitely! While there is no way to create a _completely_ safe/portable 
-garbage collector in C this collector doesn't use any platform specific tricks 
-and only makes the most basic assumptions about the platform, such as that the 
-architecture using a continuous call stack to implement function frames.
-
-It _should_ be safe to use for more or less all reasonable architectures found 
-in the wild and has been tested on Linux, Windows, and OSX, where it was easily 
-integrated into several large real world programs (see `examples`) such as 
-`bzip2` and `oggenc` without issue.
-
-Saying all of that, there are the normal warnings - this library performs 
-_undefined behaviour_ as specified by the C standard and so you use it at your 
-own risk - there is no guarantee that something like a compiler or OS update 
-wont mysteriously break it.
+At the moment `tgc` has decent performance - it is competative with many 
+existing memory management systems - but definitely can't claim to be the 
+fastest garbage collector on the market. Saying that, there is a fair amount of 
+low hanging fruit for anyone interested in optimising it - so some potential to
+be fastest exists.
 

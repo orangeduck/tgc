@@ -177,8 +177,9 @@ static void tgc_mark_ptr(tgc_t *gc, void *ptr) {
     h = gc->items[i].hash;
     if (h == 0 || j > tgc_probe(gc, i, h)) { break; }
     if (ptr == gc->items[i].ptr) {
-      if (gc->items[i].flags & TGC_MARKED) { return; }
-      gc->items[i].flags |= TGC_MARKED;
+      if (gc->items[i].flags & TGC_MARK) { return; }
+      gc->items[i].flags |= TGC_MARK;
+      if (gc->items[i].flags & TGC_LEAF) { return; }
       for (k = 0; k < gc->items[i].size/sizeof(void*); k++) {
         tgc_mark_ptr(gc, ((void**)gc->items[i].ptr)[k]);
       }
@@ -219,9 +220,10 @@ static void tgc_mark(tgc_t *gc) {
   
   for (i = 0; i < gc->nslots; i++) {
     if (gc->items[i].hash == 0) { continue; }
-    if (gc->items[i].flags & TGC_MARKED) { continue; }
+    if (gc->items[i].flags & TGC_MARK) { continue; }
     if (gc->items[i].flags & TGC_ROOT) {
-      gc->items[i].flags |= TGC_MARKED;
+      gc->items[i].flags |= TGC_MARK;
+      if (gc->items[i].flags & TGC_LEAF) { return; }
       for (k = 0; k < gc->items[i].size/sizeof(void*); k++) {
         tgc_mark_ptr(gc, ((void**)gc->items[i].ptr)[k]);
       }
@@ -249,7 +251,7 @@ void tgc_sweep(tgc_t *gc) {
   for (i = 0; i < gc->nslots; i++) {
     if ( gc->items[i].hash != 0
     && !(gc->items[i].flags & TGC_ROOT)
-    && !(gc->items[i].flags & TGC_MARKED)) {
+    && !(gc->items[i].flags & TGC_MARK)) {
       gc->nfrees++;
     }
   }
@@ -261,7 +263,7 @@ void tgc_sweep(tgc_t *gc) {
   k = 0;
   while (i < gc->nslots) {
     if (gc->items[i].hash == 0) { i++; continue; }
-    if (gc->items[i].flags & TGC_MARKED) { i++; continue; }
+    if (gc->items[i].flags & TGC_MARK) { i++; continue; }
     if (!(gc->items[i].flags & TGC_ROOT)) {
       
       gc->frees[k] = gc->items[i]; k++;
@@ -289,8 +291,8 @@ void tgc_sweep(tgc_t *gc) {
   
   for (i = 0; i < gc->nslots; i++) {
     if (gc->items[i].hash != 0
-    && (gc->items[i].flags & TGC_MARKED)) {
-      gc->items[i].flags &= ~TGC_MARKED;
+    && (gc->items[i].flags & TGC_MARK)) {
+      gc->items[i].flags &= ~TGC_MARK;
     }
   }
   
@@ -454,4 +456,11 @@ void(*tgc_get_dtor(tgc_t *gc, void *ptr))(void*) {
   if (p) { return p->dtor; }
   return NULL;
 }
+
+size_t tgc_get_size(tgc_t *gc, void *ptr) {
+  tgc_ptr_t *p  = tgc_get_ptr(gc, ptr);
+  if (p) { return p->size; }
+  return 0;
+}
+
 

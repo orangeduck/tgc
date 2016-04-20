@@ -7,8 +7,9 @@
 #include <setjmp.h>
 
 enum {
-  TGC_ROOT   = 0x01,
-  TGC_MARKED = 0x02
+  TGC_MARK = 0x01,
+  TGC_ROOT = 0x02,
+  TGC_LEAF = 0x04
 };
 
 typedef struct {
@@ -43,6 +44,6 @@ void tgc_set_dtor(tgc_t *gc, void *ptr, void(*dtor)(void*));
 void tgc_set_flags(tgc_t *gc, void *ptr, int flags);
 int tgc_get_flags(tgc_t *gc, void *ptr);
 void(*tgc_get_dtor(tgc_t *gc, void *ptr))(void*);
-
+size_t tgc_get_size(tgc_t *gc, void *ptr);
 
 #endif
