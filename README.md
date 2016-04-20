@@ -141,9 +141,9 @@ memory allocated by `malloc`.
 
 The flag `TGC_LEAF` may be specified to indicate that the allocation is a 
 garbage collection _leaf_ and so contains no pointers to other allocations
-inside. This can benefit performance in many cases. For example, if allocating 
-a large string there is no point the garbage collector scanning this allocation 
-- it can take a long time and doesn't contain any pointers.
+inside. This can benefit performance in many cases. For example, when 
+allocating a large string there is no point the garbage collector scanning 
+this allocation - it can take a long time and doesn't contain any pointers.
 
 Otherwise the `flags` argument can be set to zero.
 
