@@ -320,5 +320,5 @@ At the moment `tgc` has decent performance - it is competative with many
 existing memory management systems - but definitely can't claim to be the 
 fastest garbage collector on the market. Saying that, there is a fair amount of 
 low hanging fruit for anyone interested in optimising it - so some potential to
-be fastest exists.
+be faster exists.
 
