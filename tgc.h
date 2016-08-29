@@ -15,13 +15,13 @@ enum {
 typedef struct {
   void *ptr;
   int flags;
-  size_t size;
-  size_t hash;
+  size_t size, hash;
   void (*dtor)(void*);
 } tgc_ptr_t;
 
 typedef struct {
   void *bottom;
+  int paused;
   uintptr_t minptr, maxptr;
   tgc_ptr_t *items, *frees;
   double loadfactor, sweepfactor;
@@ -30,6 +30,8 @@ typedef struct {
 
 void tgc_start(tgc_t *gc, void *stk);
 void tgc_stop(tgc_t *gc);
+void tgc_pause(tgc_t *gc);
+void tgc_resume(tgc_t *gc);
 void tgc_run(tgc_t *gc);
 
 void *tgc_alloc(tgc_t *gc, size_t size);

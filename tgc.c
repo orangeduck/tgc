@@ -1,9 +1,95 @@
 #include "tgc.h"
 
+static size_t tgc_hash(void *ptr) {
+  return ((uintptr_t)ptr) >> 3;
+}
+
+static size_t tgc_probe(tgc_t* gc, size_t i, size_t h) {
+  long v = i - (h-1);
+  if (v < 0) { v = gc->nslots + v; }
+  return v;
+}
+
+static tgc_ptr_t *tgc_get_ptr(tgc_t *gc, void *ptr) {
+  size_t i, j, h;
+  i = tgc_hash(ptr) % gc->nslots; j = 0;
+  while (1) {
+    h = gc->items[i].hash;
+    if (h == 0 || j > tgc_probe(gc, i, h)) { return NULL; }
+    if (gc->items[i].ptr == ptr) { return &gc->items[i]; }
+    i = (i+1) % gc->nslots; j++;
+  }
+  return NULL;
+}
 
 static void tgc_add_ptr(
-  tgc_t* gc, void *ptr, size_t size, 
-  int flags, void(*dtor)(void*));
+  tgc_t *gc, void *ptr, size_t size, 
+  int flags, void(*dtor)(void*)) {
+
+  tgc_ptr_t item, tmp;
+  size_t h, p, i, j;
+
+  i = tgc_hash(ptr) % gc->nslots; j = 0;
+  
+  item.ptr = ptr;
+  item.flags = flags;
+  item.size = size;
+  item.hash = i+1;
+  item.dtor = dtor;
+  
+  while (1) {
+    h = gc->items[i].hash;
+    if (h == 0) { gc->items[i] = item; return; }
+    if (gc->items[i].ptr == item.ptr) { return; }
+    p = tgc_probe(gc, i, h);
+    if (j >= p) {
+      tmp = gc->items[i];
+      gc->items[i] = item;
+      item = tmp;
+      j = p;
+    }
+    i = (i+1) % gc->nslots; j++;
+  }
+  
+}
+
+static void tgc_rem_ptr(tgc_t *gc, void *ptr) {
+
+  size_t i, j, h, nj, nh;
+
+  if (gc->nitems == 0) { return; }
+  
+  for (i = 0; i < gc->nfrees; i++) {
+    if (gc->frees[i].ptr == ptr) { gc->frees[i].ptr = NULL; }
+  }
+  
+  i = tgc_hash(ptr) % gc->nslots; j = 0;
+  
+  while (1) {
+    h = gc->items[i].hash;
+    if (h == 0 || j > tgc_probe(gc, i, h)) { return; }
+    if (gc->items[i].ptr == ptr) {
+      memset(&gc->items[i], 0, sizeof(tgc_ptr_t));
+      j = i;
+      while (1) { 
+        nj = (j+1) % gc->nslots;
+        nh = gc->items[nj].hash;
+        if (nh != 0 && tgc_probe(gc, nj, nh) > 0) {
+          memcpy(&gc->items[ j], &gc->items[nj], sizeof(tgc_ptr_t));
+          memset(&gc->items[nj],              0, sizeof(tgc_ptr_t));
+          j = nj;
+        } else {
+          break;
+        }  
+      }
+      gc->nitems--;
+      return;
+    }
+    i = (i+1) % gc->nslots; j++;
+  }
+  
+}
+
 
 enum {
   TGC_PRIMES_COUNT = 24
@@ -17,12 +103,6 @@ static const size_t tgc_primes[TGC_PRIMES_COUNT] = {
   74093,   148073,  296099,  592019,
   1100009, 2200013, 4400021, 8800019
 };
-
-static size_t tgc_probe(tgc_t* gc, size_t i, size_t h) {
-  long v = i - (h-1);
-  if (v < 0) { v = gc->nslots + v; }
-  return v;
-}
 
 static size_t tgc_ideal_size(tgc_t* gc, size_t size) {
   size_t i, last;
@@ -77,97 +157,10 @@ static int tgc_resize_less(tgc_t *gc) {
   return (new_size < old_size) ? tgc_rehash(gc, new_size) : 1;
 }
 
-static size_t tgc_hash(void *ptr) {
-  return ((uintptr_t)ptr) >> 3;
-}
-
-static void tgc_add_ptr(
-  tgc_t *gc, void *ptr, size_t size, 
-  int flags, void(*dtor)(void*)) {
-
-  tgc_ptr_t item;
-  size_t h, p, i, j;
-
-  i = tgc_hash(ptr) % gc->nslots; j = 0;
-  
-  item.ptr = ptr;
-  item.flags = flags;
-  item.size = size;
-  item.hash = i+1;
-  item.dtor = dtor;
-  
-  while (1) {
-    h = gc->items[i].hash;
-    if (h == 0) { gc->items[i] = item; return; }
-    if (gc->items[i].ptr == item.ptr) { return; }
-    p = tgc_probe(gc, i, h);
-    if (j >= p) {
-      tgc_ptr_t tmp = gc->items[i];
-      gc->items[i] = item;
-      item = tmp;
-      j = p;
-    }
-    
-    i = (i+1) % gc->nslots;
-    j++;
-  }
-  
-}
-
-static void tgc_rem_ptr(tgc_t *gc, void *ptr) {
-
-  size_t i, j, h, nj, nh;
-
-  if (gc->nslots == 0) { return; }
-  
-  for (i = 0; i < gc->nfrees; i++) {
-    if (gc->frees[i].ptr == ptr) { gc->frees[i].ptr = NULL; }
-  }
-  
-  i = tgc_hash(ptr) % gc->nslots; j = 0;
-  
-  while (1) {
-    h = gc->items[i].hash;
-    if (h == 0 || j > tgc_probe(gc, i, h)) { return; }
-    if (gc->items[i].ptr == ptr) {
-      memset(&gc->items[i], 0, sizeof(tgc_ptr_t));
-      j = i;
-      while (1) { 
-        nj = (j+1) % gc->nslots;
-        nh = gc->items[nj].hash;
-        if (nh != 0 && tgc_probe(gc, nj, nh) > 0) {
-          memcpy(&gc->items[ j], &gc->items[nj], sizeof(tgc_ptr_t));
-          memset(&gc->items[nj],              0, sizeof(tgc_ptr_t));
-          j = nj;
-        } else {
-          break;
-        }  
-      }
-      
-      gc->nitems--;
-      return;
-    }
-    
-    i = (i+1) % gc->nslots; j++;
-  }
-  
-}
-
-static tgc_ptr_t *tgc_get_ptr(tgc_t *gc, void *ptr) {
-  size_t i, j, h;
-  i = tgc_hash(ptr) % gc->nslots; j = 0;
-  while (1) {
-    h = gc->items[i].hash;
-    if (h == 0 || j > tgc_probe(gc, i, h)) { return 0; }
-    if (gc->items[i].ptr == ptr) { return &gc->items[i]; }
-    i = (i+1) % gc->nslots; j++;
-  }
-  return NULL;
-}
-
 static void tgc_mark_ptr(tgc_t *gc, void *ptr) {
 
   size_t i, j, h, k;
+  
   if ((uintptr_t)ptr < gc->minptr 
   ||  (uintptr_t)ptr > gc->maxptr) { return; }
   
@@ -175,7 +168,7 @@ static void tgc_mark_ptr(tgc_t *gc, void *ptr) {
   
   while (1) {
     h = gc->items[i].hash;
-    if (h == 0 || j > tgc_probe(gc, i, h)) { break; }
+    if (h == 0 || j > tgc_probe(gc, i, h)) { return; }
     if (ptr == gc->items[i].ptr) {
       if (gc->items[i].flags & TGC_MARK) { return; }
       gc->items[i].flags |= TGC_MARK;
@@ -214,12 +207,13 @@ static void tgc_mark_stack(tgc_t *gc) {
 static void tgc_mark(tgc_t *gc) {
   
   size_t i, k;
+  jmp_buf env;
   void (*volatile mark_stack)(tgc_t*) = tgc_mark_stack;
   
   if (gc->nitems == 0) { return; }
   
   for (i = 0; i < gc->nslots; i++) {
-    if (gc->items[i].hash == 0) { continue; }
+    if (gc->items[i].hash ==        0) { continue; }
     if (gc->items[i].flags & TGC_MARK) { continue; }
     if (gc->items[i].flags & TGC_ROOT) {
       gc->items[i].flags |= TGC_MARK;
@@ -231,12 +225,9 @@ static void tgc_mark(tgc_t *gc) {
     }
   }
   
-  if (mark_stack) {
-    jmp_buf env;
-    memset(&env, 0, sizeof(jmp_buf));
-    setjmp(env);
-    mark_stack(gc);
-  }
+  memset(&env, 0, sizeof(jmp_buf));
+  setjmp(env);
+  mark_stack(gc);
 
 }
 
@@ -247,63 +238,54 @@ void tgc_sweep(tgc_t *gc) {
   if (gc->nitems == 0) { return; }
   
   gc->nfrees = 0;
-  
   for (i = 0; i < gc->nslots; i++) {
-    if ( gc->items[i].hash != 0
-    && !(gc->items[i].flags & TGC_ROOT)
-    && !(gc->items[i].flags & TGC_MARK)) {
-      gc->nfrees++;
-    }
+    if (gc->items[i].hash ==        0) { continue; }
+    if (gc->items[i].flags & TGC_MARK) { continue; }
+    if (gc->items[i].flags & TGC_ROOT) { continue; }
+    gc->nfrees++;
   }
 
   gc->frees = realloc(gc->frees, sizeof(tgc_ptr_t) * gc->nfrees);
   if (gc->frees == NULL) { return; }
   
-  i = 0;
-  k = 0;
+  i = 0; k = 0;
   while (i < gc->nslots) {
-    if (gc->items[i].hash == 0) { i++; continue; }
+    if (gc->items[i].hash ==        0) { i++; continue; }
     if (gc->items[i].flags & TGC_MARK) { i++; continue; }
-    if (!(gc->items[i].flags & TGC_ROOT)) {
-      
-      gc->frees[k] = gc->items[i]; k++;
-      memset(&gc->items[i], 0, sizeof(tgc_ptr_t));
-      
-      j = i;
-      while (1) { 
-        nj = (j+1) % gc->nslots;
-        nh = gc->items[nj].hash;
-        if (nh != 0 && tgc_probe(gc, nj, nh) > 0) {
-          memcpy(&gc->items[ j], &gc->items[nj], sizeof(tgc_ptr_t));
-          memset(&gc->items[nj],              0, sizeof(tgc_ptr_t));
-          j = nj;
-        } else {
-          break;
-        }  
-      }
-      
-      gc->nitems--;
-      continue;
-    }
+    if (gc->items[i].flags & TGC_ROOT) { i++; continue; }
     
-    i++;
+    gc->frees[k] = gc->items[i]; k++;
+    memset(&gc->items[i], 0, sizeof(tgc_ptr_t));
+    
+    j = i;
+    while (1) { 
+      nj = (j+1) % gc->nslots;
+      nh = gc->items[nj].hash;
+      if (nh != 0 && tgc_probe(gc, nj, nh) > 0) {
+        memcpy(&gc->items[ j], &gc->items[nj], sizeof(tgc_ptr_t));
+        memset(&gc->items[nj],              0, sizeof(tgc_ptr_t));
+        j = nj;
+      } else {
+        break;
+      }  
+    }
+    gc->nitems--;
   }
   
   for (i = 0; i < gc->nslots; i++) {
-    if (gc->items[i].hash != 0
-    && (gc->items[i].flags & TGC_MARK)) {
+    if (gc->items[i].hash == 0) { continue; }
+    if (gc->items[i].flags & TGC_MARK) {
       gc->items[i].flags &= ~TGC_MARK;
     }
   }
   
   tgc_resize_less(gc);
+  
   gc->mitems = gc->nitems + (size_t)(gc->nitems * gc->sweepfactor) + 1;
   
   for (i = 0; i < gc->nfrees; i++) {
     if (gc->frees[i].ptr) {
-      if (gc->frees[i].dtor) {
-        gc->frees[i].dtor(gc->frees[i].ptr);
-      }
+      if (gc->frees[i].dtor) { gc->frees[i].dtor(gc->frees[i].ptr); }
       free(gc->frees[i].ptr);
     }
   }
@@ -316,6 +298,7 @@ void tgc_sweep(tgc_t *gc) {
 
 void tgc_start(tgc_t *gc, void *stk) {
   gc->bottom = stk;
+  gc->paused = 0;
   gc->nitems = 0;
   gc->nslots = 0;
   gc->mitems = 0;
@@ -332,6 +315,14 @@ void tgc_stop(tgc_t *gc) {
   tgc_sweep(gc);
   free(gc->items);
   free(gc->frees);
+}
+
+void tgc_pause(tgc_t *gc) {
+  gc->paused = 1;
+}
+
+void tgc_resume(tgc_t *gc) {
+  gc->paused = 0;
 }
 
 void tgc_run(tgc_t *gc) {
@@ -351,7 +342,9 @@ static void *tgc_add(
 
   if (tgc_resize_more(gc)) {
     tgc_add_ptr(gc, ptr, size, flags, dtor);
-    if (gc->nitems > gc->mitems) { tgc_run(gc); }
+    if (!gc->paused && gc->nitems > gc->mitems) {
+      tgc_run(gc);
+    }
     return ptr;
   } else {
     gc->nitems--;
@@ -409,9 +402,10 @@ void *tgc_realloc(tgc_t *gc, void *ptr, size_t size) {
 
 void tgc_free(tgc_t *gc, void *ptr) {
   tgc_ptr_t *p  = tgc_get_ptr(gc, ptr);
-  /* TODO: Optimise */
-  if (p && p->dtor) {
-    p->dtor(ptr);
+  if (p) {
+    if (p->dtor) {
+      p->dtor(ptr);
+    }
     free(ptr);
     tgc_rem(gc, ptr);
   }
@@ -462,5 +456,3 @@ size_t tgc_get_size(tgc_t *gc, void *ptr) {
   if (p) { return p->size; }
   return 0;
 }
-
-

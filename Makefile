@@ -2,7 +2,7 @@ CC ?= gcc
 AR ?= ar
 CFLAGS = -ansi -O3 -fpic -pedantic -g -Wall -Wno-unused
 LFLAGS = -fpic
-ECFLAGS = -std=gnu99 -O3 -g -Wno-overlength-strings
+ECFLAGS = -std=c99 -O3 -g
 
 INCDIR = $(PREFIX)/include
 LIBDIR = $(PREFIX)/lib

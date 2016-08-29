@@ -90,6 +90,16 @@ void tgc_run(tgc_t *gc);
 
 Run an iteration of the garbage collector, freeing any unreachable memory.
 
+* * *
+
+```c
+void tgc_pause(tgc_t *gc);
+void tgc_resume(tgc_t *gc);
+```
+
+Pause or resume the garbage collector. While paused the garbage collector will
+not run during any allocations made.
+
 * * * 
 
 ```c
@@ -321,4 +331,160 @@ existing memory management systems - but definitely can't claim to be the
 fastest garbage collector on the market. Saying that, there is a fair amount of 
 low hanging fruit for anyone interested in optimising it - so some potential to
 be fastest exists.
+
+
+How it Works
+------------
+
+For a basic _mark and sweep_ garbage collector two things are required. The 
+first thing is a list of all of the allocations made by the program. The second 
+is a list of all the allocations _in use_ by the program at any given time. 
+With these two things the algorithm is simple - compare the two lists and free 
+any allocations which are in the first list, but not in the second - exactly 
+those allocations which are no longer in use.
+
+To get a list of all the allocations made by the progam is relatively 
+simple. We make the programmer use a special function we've prepared (in this
+case `tgc_alloc`) which allocates memory, and then adds a pointer to that 
+memory to an internal list. If at any point this allocation is freed (such as 
+by `tgc_free`), it is removed from the list.
+
+The second list is the difficult one - the list of allocations _in use_ by the 
+program. At first, with C's semantics, pointer arithematic, and all the crazy 
+flexibility that comes with it, it might seem like finding all the allocations 
+in use by the program at any point in time is impossible, and to some extent 
+you'd be right. It can actually be shown that this problem reduces to the 
+halting problem in the most general case - even for languages saner than C - 
+but by slightly adjusting our problem statement, and assuming we are only 
+dealing with a set of _well behaved_ C programs of some form, we can come up 
+with something that works.
+
+First we have to relax our goal a little. Instead of trying to find all of 
+the memory allocations _in use_ by a program, we can instead try to find all 
+the _reachable_ memory allocations - those allocations which have a pointer 
+pointing to them somewhere in the program's memory. The distinction here is 
+subtle but important. For example, I _could_ write a C program which makes an 
+allocation, encodes the returned pointer as a string, and performs `rot13` on 
+that string, later on decoding the string, casting it back to a pointer, 
+and using the memory as if nothing had happened. This is a perfectly valid, C 
+program, and the crazy memory allocation is _is use_ throughout. It is just 
+that during the pointer's `rot13` encoding there is no practical way to know 
+that this memory allocation is still going to be used later on.
+
+So instead we want to make a list of all memory allocations which are pointed 
+to by pointers in the program's memory. For most _well behaved_ C programs this
+is enough to tell if an allocation is in use.
+
+In general, memory in C exists in three different segments. We have the stack,
+the heap, and the data segment. This means - if a pointer to a certain 
+allocation exists in the program's memory it must be in one of these locations.
+Now the challenge is to find these locations, and scan them for pointers.
+
+The data segment is the most difficult - there is no portable way to get the 
+bounds of this segment. But because the data segment is somewhat limited in use 
+we can choose to ignore it - we tell users that allocations only pointed to 
+from the data segment are not considered reachable.
+
+As an aside, for programmers coming from other languages, this might seem like 
+a poor solution - to simply ask the programmer not to store pointers to 
+allocations in this segment - and in many ways it is. It is never a good 
+interface to _request_ the programmer do something in the documentation - 
+instead it is better to handle every edge case to make it impossible for them 
+to create an error. But this is C - in C programmers are constantly asked _not_
+to do things which are perfectly possible. In fact - one of the very things 
+this library is trying to deal with is the fact that programmers are only 
+_asked_ to make sure they free dynamically allocated memory - there is no 
+system in place to enforce this. So _for C_ this is a perfectly reasonable 
+interface. And there is an added advantage - it makes the implementation far 
+more simple - far more adaptable. In other words - [Worse Is Better](https://en.wikipedia.org/wiki/Worse_is_better).
+
+With the data segment covered we have the heap and the stack. If we consider
+only the heap allocations which have been made via `tgc_alloc` and friends then
+our job is again made easy - in our list of all allocations we also store the
+size of each allocation. Then, if we need to scan one of the memory regions 
+we've allocated, the task is made easy.
+
+With the heap and the data segment covered, this leaves us with the stack - 
+this is the most tricky segment. The stack is something we don't have any 
+control over, but we do know that for most reasonable implementations of C, the
+stack is a continuous area of memory that is expanded downwards (or for some
+implementations upwards, but it doesn't matter) for each function call. It 
+contains the most important memory in regards to reachability - all of the 
+local variables used in functions.
+
+If we can get the memory addresses of the top and the bottom of the stack we 
+can scan the memory inbetween as if it were heap memory, and add to our list of 
+reachable pointers all those found inbetween.
+
+Assuming the stack grows from top to bottom we can get a conservative 
+approximation of the bottom of the stack by just taking the address of some 
+local variable.
+
+```c
+void *stack_bottom(void) {
+  int x;
+  return &x;
+}
+```
+
+This address should cover the memory of all the local variables for whichever
+function calls it. For this reason we need to ensure two things before we 
+actually do call it. First we want to make sure we flush all of the values in 
+the registers onto the stack so that we don't miss a pointer hiding in a 
+register, and secondly we want to make sure the call to `stack_bottom` isn't 
+inlined by the compiler.
+
+We can spill the registers into stack memory in a somewhat portable way with 
+`setjmp` - which puts the registers into a `jmp_buf` variable. And we can 
+ensure that the function is not inlined by only calling it via a volatile 
+function pointer. The `volatile` keyword forces the compiler to always manually
+read the pointer value from memory before calling the function, ensuring it
+cannot be inlined.
+
+```c
+void *get_stack_bottom(void) {
+  jmt_buf env;
+  setjmp(env);
+  void *(*volatile f)(void) = stack_bottom;
+  return f();
+}
+```
+
+To get the top of the stack we can again get the address of a local variable.
+This time it is easier if we simply ask the programmer to supply us with one.
+If the programmer wishes for the garbage collector to scan the whole stack he 
+can give the address of a local variable in `main`. This address should cover 
+all function calls one deeper than `main`. This we can store in some global 
+(or local) variable.
+
+
+```c
+static void *stack_top = NULL;
+
+int main(int argc, char **argv) {
+  stack_top = &argc;
+  run_program(argc, argv);
+  return 1;
+}
+```
+
+Now, at any point we can get a safe approximate upper and lower bound of the 
+stack memory, allowing us to scan it for pointers. We interprit each bound as a
+`void **` - a pointer to an array of pointers, and iterate, interpriting the
+memory inbetween as pointers.
+
+```c
+void mark(void) {
+  void **p;
+  void **t = stack_top;
+  void **b = get_stack_bottom();
+  
+  for (p = t; p < b; p++) {
+    scan(*p);
+  }
+}
+```
+
+
+
 
