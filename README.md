@@ -151,9 +151,9 @@ memory allocated by `malloc`.
 
 The flag `TGC_LEAF` may be specified to indicate that the allocation is a 
 garbage collection _leaf_ and so contains no pointers to other allocations
-inside. This can benefit performance in many cases. For example, if allocating 
-a large string there is no point the garbage collector scanning this allocation 
-- it can take a long time and doesn't contain any pointers.
+inside. This can benefit performance in many cases. For example, when 
+allocating a large string there is no point the garbage collector scanning 
+this allocation - it can take a long time and doesn't contain any pointers.
 
 Otherwise the `flags` argument can be set to zero.
 
@@ -330,7 +330,7 @@ At the moment `tgc` has decent performance - it is competative with many
 existing memory management systems - but definitely can't claim to be the 
 fastest garbage collector on the market. Saying that, there is a fair amount of 
 low hanging fruit for anyone interested in optimising it - so some potential to
-be fastest exists.
+be faster exists.
 
 
 How it Works
