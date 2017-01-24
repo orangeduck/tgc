@@ -363,7 +363,7 @@ void *tgc_alloc(tgc_t *gc, size_t size) {
   return tgc_alloc_opt(gc, size, 0, NULL);
 }
 
-void *tgc_strdup (tgc_t *gc, const char *str) {
+char *tgc_strdup (tgc_t *gc, const char *str) {
 	return tgc_strdup_opt (gc, str, 0);
 }
 
@@ -433,7 +433,7 @@ void *tgc_calloc_opt(
   return ptr;
 }
 
-void *tgc_strdup_opt (
+char *tgc_strdup_opt (
   tgc_t *gc, const char *src,
   int flags) {
   char *ptr = strdup (src);
