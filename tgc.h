@@ -36,11 +36,13 @@ void tgc_run(tgc_t *gc);
 
 void *tgc_alloc(tgc_t *gc, size_t size);
 void *tgc_calloc(tgc_t *gc, size_t num, size_t size);
+void *tgc_strdup (tgc_t *gc, const char *str);
 void *tgc_realloc(tgc_t *gc, void *ptr, size_t size);
 void tgc_free(tgc_t *gc, void *ptr);
 
 void *tgc_alloc_opt(tgc_t *gc, size_t size, int flags, void(*dtor)(void*));
 void *tgc_calloc_opt(tgc_t *gc, size_t num, size_t size, int flags, void(*dtor)(void*));
+void *tgc_strdup_opt (tgc_t *gc, const char *str, int flags);
 
 void tgc_set_dtor(tgc_t *gc, void *ptr, void(*dtor)(void*));
 void tgc_set_flags(tgc_t *gc, void *ptr, int flags);

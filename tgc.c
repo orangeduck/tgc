@@ -363,6 +363,10 @@ void *tgc_alloc(tgc_t *gc, size_t size) {
   return tgc_alloc_opt(gc, size, 0, NULL);
 }
 
+void *tgc_strdup (tgc_t *gc, const char *str) {
+	return tgc_strdup_opt (gc, str, 0);
+}
+
 void *tgc_calloc(tgc_t *gc, size_t num, size_t size) {
   return tgc_calloc_opt(gc, num, size, 0, NULL);
 }
@@ -428,6 +432,17 @@ void *tgc_calloc_opt(
   }
   return ptr;
 }
+
+void *tgc_strdup_opt (
+  tgc_t *gc, const char *src,
+  int flags) {
+  char *ptr = strdup (src);
+  if (ptr != NULL) {
+  	ptr = tgc_add(gc, ptr, (strlen (ptr) + 1) * sizeof (char), flags, NULL);
+  }
+  return ptr;
+}
+
 
 void tgc_set_dtor(tgc_t *gc, void *ptr, void(*dtor)(void*)) {
   tgc_ptr_t *p  = tgc_get_ptr(gc, ptr);
