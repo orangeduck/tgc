@@ -217,11 +217,11 @@ static void tgc_mark(tgc_t *gc) {
     if (gc->items[i].flags & TGC_MARK) { continue; }
     if (gc->items[i].flags & TGC_ROOT) {
       gc->items[i].flags |= TGC_MARK;
-      if (gc->items[i].flags & TGC_LEAF) { return; }
+      if (gc->items[i].flags & TGC_LEAF) { continue; }
       for (k = 0; k < gc->items[i].size/sizeof(void*); k++) {
         tgc_mark_ptr(gc, ((void**)gc->items[i].ptr)[k]);
       }
-      return;
+      continue;
     }
   }
   
