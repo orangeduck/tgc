@@ -315,6 +315,13 @@ int main(int argc, char **argv) {
 }
 ```
 
+### `tgc` isn't working with `setjmp` and `longjmp`!
+
+Unfortunately `tgc` doesn't work properly with `setjmp` and `longjmp` since 
+these functions can cause complex stack behaviour. One simple option is to 
+disable the garbage collector while using these functions and to re-enable
+it afterwards.
+
 ### Why do I get _uninitialised values_ warnings with Valgrind?
 
 The garbage collector scans the stack memory and this naturally contains 
