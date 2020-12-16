@@ -203,13 +203,13 @@ static void tgc_mark_stack(tgc_t *gc) {
   }
   
 }
-
+void tgc_stack_null(tgc_t* tgc) {(void)tgc;}
 static void tgc_mark(tgc_t *gc) {
   
   size_t i, k;
   jmp_buf env;
-  void (*volatile mark_stack)(tgc_t*) = tgc_mark_stack;
-  
+  //void (*volatile mark_stack)(tgc_t*) = tgc_mark_stack;
+  void (*volatile mark_stack)(tgc_t*) = tgc_stack_null;
   if (gc->nitems == 0) { return; }
   
   for (i = 0; i < gc->nslots; i++) {
