@@ -1,7 +1,8 @@
 #include "tgc.h"
 
 static size_t tgc_hash(void *ptr) {
-  return ((uintptr_t)ptr) >> 3;
+    uintptr_t ad = (uintptr_t) ptr;
+    return (size_t) ((13*ad) ^ (ad >> 15));
 }
 
 static size_t tgc_probe(tgc_t* gc, size_t i, size_t h) {
