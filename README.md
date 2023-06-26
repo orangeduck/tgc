@@ -289,7 +289,7 @@ deal with offset pointers nicely.
 ### `tgc` isn't working when optimisations are enabled!
 
 Variables are only considered reachable if they are one function call shallower 
-than the call to `tgc_start`. If optimisations are enabled somtimes the 
+than the call to `tgc_start`. If optimisations are enabled sometimes the 
 compiler will inline functions which removes this one level of indirection.
 
 The most portable way to get compilers not to inline functions is to call them 
