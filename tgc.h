@@ -6,6 +6,9 @@
 #include <string.h>
 #include <setjmp.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 enum {
   TGC_MARK = 0x01,
   TGC_ROOT = 0x02,
@@ -48,4 +51,7 @@ int tgc_get_flags(tgc_t *gc, void *ptr);
 void(*tgc_get_dtor(tgc_t *gc, void *ptr))(void*);
 size_t tgc_get_size(tgc_t *gc, void *ptr);
 
+#ifdef __cplusplus
+}
+#endif
 #endif
