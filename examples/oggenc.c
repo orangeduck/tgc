@@ -724,6 +724,33 @@ long raw_read_stereo(void *, float **buffer, int samples);
 
 #define CHUNK 4096 /* We do reads, etc. in multiples of this */
 
+
+/* For communication from `getopt' to the caller.
+   When `getopt' finds an option that takes an argument,
+   the argument value is returned here.
+   Also, when `ordering' is RETURN_IN_ORDER,
+   each non-option ARGV-element is returned here.  */
+char *optarg;
+
+/* Index in ARGV of the next element to be scanned.
+   This is used for communication to and from the caller
+   and for communication between successive calls to `getopt'.
+
+   On entry to `getopt', zero means this is the first call; initialize.
+
+   When `getopt' returns -1, this is the index of the first of the
+   non-option elements that the caller should itself scan.
+
+   Otherwise, `optind' communicates from one call to the next
+   how much of ARGV has been scanned so far.  */
+
+/* 1003.2 says this must be 1 before any call.  */
+int optind = 1;
+
+/* Formerly, initialization of getopt depended on optind==0, which
+   causes problems with re-calling getopt as programs generally don't
+   know that. */
+
 struct option long_options[] = {
 	{"quiet",0,0,'Q'},
 	{"help",0,0,'h'},
@@ -3771,32 +3798,7 @@ void res_clear(res_state *state)
 
 /* Names for the values of the `has_arg' field of `struct option'.  */
 
-/* For communication from `getopt' to the caller.
-   When `getopt' finds an option that takes an argument,
-   the argument value is returned here.
-   Also, when `ordering' is RETURN_IN_ORDER,
-   each non-option ARGV-element is returned here.  */
 
-char *optarg;
-
-/* Index in ARGV of the next element to be scanned.
-   This is used for communication to and from the caller
-   and for communication between successive calls to `getopt'.
-
-   On entry to `getopt', zero means this is the first call; initialize.
-
-   When `getopt' returns -1, this is the index of the first of the
-   non-option elements that the caller should itself scan.
-
-   Otherwise, `optind' communicates from one call to the next
-   how much of ARGV has been scanned so far.  */
-
-/* 1003.2 says this must be 1 before any call.  */
-int optind = 1;
-
-/* Formerly, initialization of getopt depended on optind==0, which
-   causes problems with re-calling getopt as programs generally don't
-   know that. */
 
 int __getopt_initialized;
 

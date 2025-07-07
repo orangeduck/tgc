@@ -1,9 +1,11 @@
 #include "tgc.h"
 
+#ifndef TGC_CUSTOM_HASH
 static size_t tgc_hash(void *ptr) {
     uintptr_t ad = (uintptr_t) ptr;
     return (size_t) ((13*ad) ^ (ad >> 15));
 }
+#endif
 
 static size_t tgc_probe(tgc_t* gc, size_t i, size_t h) {
   long v = i - (h-1);
@@ -43,7 +45,7 @@ static void tgc_add_ptr(
     if (h == 0) { gc->items[i] = item; return; }
     if (gc->items[i].ptr == item.ptr) { return; }
     p = tgc_probe(gc, i, h);
-    if (j >= p) {
+    if (j > p) {
       tmp = gc->items[i];
       gc->items[i] = item;
       item = tmp;
@@ -125,7 +127,7 @@ static int tgc_rehash(tgc_t* gc, size_t new_size) {
   size_t old_size = gc->nslots;
   
   gc->nslots = new_size;
-  gc->items = calloc(gc->nslots, sizeof(tgc_ptr_t));
+  gc->items = (tgc_ptr_t*)calloc(gc->nslots, sizeof(tgc_ptr_t));
   
   if (gc->items == NULL) {
     gc->nslots = old_size;
@@ -246,7 +248,7 @@ void tgc_sweep(tgc_t *gc) {
     gc->nfrees++;
   }
 
-  gc->frees = realloc(gc->frees, sizeof(tgc_ptr_t) * gc->nfrees);
+  gc->frees = (tgc_ptr_t*)realloc(gc->frees, sizeof(tgc_ptr_t) * gc->nfrees);
   if (gc->frees == NULL) { return; }
   
   i = 0; k = 0;

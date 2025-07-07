@@ -28,6 +28,11 @@ typedef struct {
   size_t nitems, nslots, mitems, nfrees;
 } tgc_t;
 
+
+#ifdef TGC_CUSTOM_HASH
+size_t tgc_hash(void *ptr);
+#endif
+
 void tgc_start(tgc_t *gc, void *stk);
 void tgc_stop(tgc_t *gc);
 void tgc_pause(tgc_t *gc);

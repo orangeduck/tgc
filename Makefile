@@ -1,5 +1,7 @@
 CC ?= gcc
+CPP = g++
 AR ?= ar
+ECPPFLAGS = -std=c++11 -O3 -g
 CFLAGS = -ansi -O3 -fpic -pedantic -g -Wall -Wno-unused
 LFLAGS = -fpic
 ECFLAGS = -std=c99 -O3 -g
@@ -43,6 +45,10 @@ $(CHECKER) ./examples/bzip2 -c ./examples/Lenna.png -9 > ./examples/Lenna.png.bz
 $(CHECKER) ./examples/mpc ./examples/prelude.lspy
 	$(CC) $(ECFLAGS) examples/oggenc.c tgc.c -lm -o ./examples/oggenc && \
 $(CHECKER) ./examples/oggenc ./examples/jfk.wav  
+	$(CPP) $(ECPPFLAGS) tests/test.cpp -lm -o ./tests/test && \
+$(CHECKER) ./tests/test
+	$(CPP) $(ECPPFLAGS) tests/chaos.cpp -lm -o ./tests/chaos && \
+$(CHECKER) ./tests/chaos
 
 clean:
 	rm -rf $(STATIC) $(DYNAMIC) $(OBJECT)
